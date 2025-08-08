@@ -10,7 +10,8 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 app.use(cors({
-    proxy: 'http://localhost:5173'
+    // proxy: 'http://localhost:5173'
+    proxy : "https://vercel.com/maharshs-projects-50474920/online-compiler/8s4N2dLgmGz8gfM58nA54DCQ2yvj"
 }));
 app.use(bodyParser.json());
 
