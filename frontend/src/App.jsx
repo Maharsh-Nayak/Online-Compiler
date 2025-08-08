@@ -31,7 +31,7 @@ function App() {
     setIsLoading(true)
     try {
 
-      const res = await axios.post(`http://localhost:5000/compile/${language}`, { code });
+      const res = await axios.post(`https://online-compiler-backend-tp5b.onrender.com/compile/${language}`, { code });
       const data = res.data;
 
       if(res.status === 200) {
