@@ -176,6 +176,32 @@
   transform: translateY(-1px);
 }
 
+.clear-button:disabled {
+  background-color: #64748b;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.stop-button {
+  background-color: var(--danger-color);
+  color: white;
+  animation: pulse 2s infinite;
+}
+
+.stop-button:hover {
+  background-color: #dc2626;
+  transform: translateY(-1px);
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
 /* Workspace Styles */
 .workspace {
   flex: 1;
@@ -219,6 +245,22 @@
   color: var(--primary-color);
 }
 
+.running-indicator {
+  margin-left: auto;
+  color: var(--secondary-color);
+  font-size: 0.75rem;
+  animation: blink 1.5s infinite;
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
 .editor-wrapper {
   flex: 1;
   overflow: hidden;
@@ -238,6 +280,59 @@
   color: var(--text-primary);
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+/* Stdin Input Styles */
+.stdin-input-container {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background-color: var(--dark-bg);
+  border-top: 1px solid var(--border-color);
+}
+
+.stdin-input {
+  flex: 1;
+  padding: 0.625rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  background-color: var(--darker-bg);
+  color: var(--text-primary);
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.875rem;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.stdin-input:focus {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.send-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  background-color: var(--primary-color);
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.send-button:hover:not(:disabled) {
+  background-color: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+.send-button:disabled {
+  background-color: #64748b;
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* Light Theme Overrides */

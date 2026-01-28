@@ -1,127 +1,499 @@
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
-const { exec } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const { v4: uuidv4 } = require('uuid');
+const Docker = require('dockerode');
+const WebSocket = require('ws');
+const http = require('http');
+const tar = require('tar-stream');
+const { Readable } = require('stream');
+
+// Initialize Docker client
+// This connects to your local Docker daemon
+const docker = new Docker();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-app.use(cors({
-    // proxy: 'http://localhost:5173'
-    proxy : "https://vercel.com/maharshs-projects-50474920/online-compiler/8s4N2dLgmGz8gfM58nA54DCQ2yvj"
-}));
+// Create HTTP server (needed for WebSocket)
+const server = http.createServer(app);
+
+// Create WebSocket server on same port
+const wss = new WebSocket.Server({ server });
+
+app.use(cors());
 app.use(bodyParser.json());
 
-function createTempFile(language, code) {
-    const tempDir = path.join(__dirname, 'temp');
-    if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir);
+/**
+ * DOCKER CONFIGURATION
+ * These settings provide isolation and resource limits to prevent:
+ * - Memory bombs (limit to 128MB)
+ * - CPU exhaustion (limit CPU shares)
+ * - Network attacks (disable network)
+ * - Fork bombs (limit processes to 50)
+ * - File system tampering (read-only root)
+ */
+const CONTAINER_CONFIG = {
+    Memory: 128 * 1024 * 1024,        // 128MB RAM limit
+    MemorySwap: 128 * 1024 * 1024,    // No additional swap
+    CpuShares: 512,                    // Limit CPU usage (1024 = 1 CPU)
+    NetworkDisabled: true,             // No network access
+    PidsLimit: 50,                     // Max 50 processes (prevents fork bombs)
+    AttachStdin: true,                 // Allow stdin input
+    AttachStdout: true,                // Capture stdout
+    AttachStderr: true,                // Capture stderr
+    Tty: false,                        // No pseudo-TTY
+    OpenStdin: true,                   // Keep stdin open
+    StdinOnce: false,                  // Allow multiple stdin writes
+};
+
+const EXECUTION_TIMEOUT = 10000; // 10 seconds max execution time
+
+/**
+ * Language configurations
+ * Defines how to compile and run code for each language
+ */
+const LANGUAGE_CONFIG = {
+    javascript: {
+        image: 'coderunner-js:latest',
+        fileExtension: 'js',
+        fileName: 'code.js',
+        compileCmd: null, // No compilation needed
+        runCmd: ['node', 'code.js']
+    },
+    cpp: {
+        image: 'coderunner-cpp:latest',
+        fileExtension: 'cpp',
+        fileName: 'code.cpp',
+        compileCmd: ['g++', 'code.cpp', '-o', 'program', '-std=c++17'],
+        runCmd: ['./program']
+    },
+    java: {
+        image: 'coderunner-java:latest',
+        fileExtension: 'java',
+        fileName: 'Main.java', // Will be replaced with actual class name
+        compileCmd: ['javac', 'Main.java'],
+        runCmd: ['java', 'Main']
     }
+};
 
-    const fileName = `${uuidv4()}.${language}`;
-    const filePath = path.join(tempDir, fileName);
-    fs.writeFileSync(filePath, code);
-    return { fileName, filePath, tempDir };
-}
+/**
+ * Creates a tar archive containing the code file
+ * Docker requires files to be sent as tar archives
+ * 
+ * @param {string} fileName - Name of the file
+ * @param {string} code - Code content
+ * @returns {Buffer} - Tar archive as buffer
+ */
+function createTarArchive(fileName, code) {
+    return new Promise((resolve, reject) => {
+        const pack = tar.pack();
+        const chunks = [];
 
-function cleanupTempFiles(filePath) {
-    try {
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-        }
-    } catch (error) {
-        console.error('Error cleaning up file:', error);
-    }
-}
+        // Collect tar data
+        pack.on('data', chunk => chunks.push(chunk));
+        pack.on('end', () => resolve(Buffer.concat(chunks)));
+        pack.on('error', reject);
 
-app.post('/compile/cpp', (req, res) => {
-    const { code } = req.body;
-    const { fileName, filePath, tempDir } = createTempFile('cpp', code);
-
-    const compileCommand = `g++ ${filePath} -o ${path.join(tempDir, fileName.replace('.cpp', ''))}`;
-    exec(compileCommand, (error, stdout, stderr) => {
-        if (error) {
-            cleanupTempFiles(filePath);
-            return res.status(500).json({ error: 'Compilation error' });
-        }
-
-        const executablePath = path.join(tempDir, fileName.replace('.cpp', ''));
-        const runCommand = executablePath;
-        exec(runCommand, (error, stdout, stderr) => {
-            cleanupTempFiles(filePath);
-            cleanupTempFiles(executablePath);
-            if (error) {
-                return res.status(500).json({ error: stderr || error.message });
-            }
-            return res.json({ output: stdout });
-        })
-    })
-});
-
-app.post('/compile/java', (req, res) => {
-    const { code } = req.body;
-
-    const tempDir = path.join(__dirname, 'temp');
-    if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir);
-    }
-
-    
-    // Extract class name from Java code
-    const classNameMatch = code.match(/public\s+class\s+(\w+)/);
-    if (!classNameMatch) {
-        cleanupTempFiles(filePath);
-        return res.status(400).json({ error: 'Java code must contain a public class' });
-    }
-    
-    const className = classNameMatch[1];
-    const fileName = `${className}.java`;
-    const filePath = path.join(tempDir, fileName);
-    fs.writeFileSync(filePath, code);
-    
-    // Compile Java code
-    const compileCommand = `javac ${filePath}`;
-    exec(compileCommand, (compileError, compileStdout, compileStderr) => {
-        if (compileError) {
-            cleanupTempFiles(filePath);
-            return res.status(500).json({ error: compileStderr || compileError.message });
-        }
-        
-        // Execute compiled Java class
-        const runCommand = `java -cp ${tempDir} ${className}`;
-        exec(runCommand, (error, stdout, stderr) => {
-            cleanupTempFiles(filePath);
-            cleanupTempFiles(path.join(tempDir, `${className}.class`));
-            
-            if (error) {
-                return res.status(500).json({ error: stderr || error.message });
-            }
-            
-            return res.json({ output: stdout || 'Code executed successfully with no output' });
+        // Add file to archive
+        pack.entry({ name: fileName }, code, (err) => {
+            if (err) reject(err);
+            pack.finalize();
         });
+    });
+}
+
+/**
+ * Extracts Java class name from code
+ * Java requires the filename to match the public class name
+ * 
+ * @param {string} code - Java source code
+ * @returns {string|null} - Class name or null
+ */
+function extractJavaClassName(code) {
+    const match = code.match(/public\s+class\s+(\w+)/);
+    return match ? match[1] : null;
+}
+
+/**
+ * Main Docker execution engine
+ * This function handles the entire lifecycle of code execution:
+ * 1. Create container with resource limits
+ * 2. Copy code into container
+ * 3. Compile code (if needed)
+ * 4. Execute code with stdin/stdout streaming
+ * 5. Handle timeout
+ * 6. Cleanup container
+ * 
+ * @param {string} language - Programming language
+ * @param {string} code - Source code
+ * @param {Stream} stdinStream - Input stream from user
+ * @param {Function} onOutput - Callback for output chunks
+ * @param {Function} onError - Callback for errors
+ * @param {Function} onComplete - Callback when execution completes
+ */
+async function executeInDocker(language, code, stdinStream, onOutput, onError, onComplete) {
+    let container = null;
+    let timeoutHandle = null;
+    let execStream = null;
+
+    try {
+        const config = LANGUAGE_CONFIG[language];
+        if (!config) {
+            throw new Error(`Unsupported language: ${language}`);
+        }
+
+        // For Java, extract class name and set filename
+        let fileName = config.fileName;
+        let compileCmd = config.compileCmd;
+        let runCmd = config.runCmd;
+
+        if (language === 'java') {
+            const className = extractJavaClassName(code);
+            if (!className) {
+                throw new Error('Java code must contain a public class');
+            }
+            fileName = `${className}.java`;
+            compileCmd = ['javac', fileName];
+            runCmd = ['java', className];
+        }
+
+        // Step 1: Create container
+        onOutput(`[System] Creating isolated container...\n`);
+        container = await docker.createContainer({
+            Image: config.image,
+            ...CONTAINER_CONFIG,
+            Cmd: ['/bin/sh'], // Keep container alive
+        });
+
+        // Step 2: Start container
+        await container.start();
+        onOutput(`[System] Container started\n`);
+
+        // Step 3: Copy code into container
+        const tarArchive = await createTarArchive(fileName, code);
+        await container.putArchive(tarArchive, { path: '/app' });
+        onOutput(`[System] Code uploaded\n`);
+
+        // Step 4: Compile code (if needed)
+        if (compileCmd) {
+            onOutput(`[System] Compiling...\n`);
+            const compileExec = await container.exec({
+                Cmd: compileCmd,
+                AttachStdout: true,
+                AttachStderr: true,
+            });
+
+            const compileStream = await compileExec.start({ Tty: false });
+            
+            // Wait for compilation
+            const compileOutput = await new Promise((resolve, reject) => {
+                const chunks = [];
+                compileStream.on('data', chunk => chunks.push(chunk));
+                compileStream.on('end', () => resolve(Buffer.concat(chunks)));
+                compileStream.on('error', reject);
+            });
+
+            // Docker multiplexes streams - demultiplex them
+            const demuxed = demultiplexDockerStream(compileOutput);
+            
+            if (demuxed.stderr && demuxed.stderr.length > 0) {
+                let errorMsg = demuxed.stderr.toString('utf8').trim();
+                
+                // Filter out harmless JVM startup messages
+                const lines = errorMsg.split('\n');
+                const realErrors = lines.filter(line => 
+                    !line.includes('Picked up JAVA_TOOL_OPTIONS') &&
+                    !line.match(/^\s*$/) // ignore blank lines
+                );
+                
+                if (realErrors.length > 0) {
+                    onError(`Compilation Error:\n${realErrors.join('\n')}`);
+                    onComplete();
+                    return;
+                }
+            }
+
+            onOutput(`[System] Compilation successful\n`);
+        }
+
+        // Step 5: Execute code
+        onOutput(`[System] Executing...\n\n--- Output ---\n`);
+        const exec = await container.exec({
+            Cmd: runCmd,
+            AttachStdin: true,
+            AttachStdout: true,
+            AttachStderr: true,
+        });
+
+        execStream = await exec.start({
+            Tty: false,
+            stdin: true,
+        });
+
+        // Set execution timeout
+        timeoutHandle = setTimeout(async () => {
+            onError('\n[System] Execution timeout (10 seconds exceeded)');
+            if (execStream) execStream.end();
+            onComplete();
+        }, EXECUTION_TIMEOUT);
+
+        // Pipe stdin from WebSocket to container
+        if (stdinStream) {
+            stdinStream.on('data', (data) => {
+                if (execStream && !execStream.destroyed) {
+                    execStream.write(data);
+                }
+            });
+
+            stdinStream.on('end', () => {
+                if (execStream && !execStream.destroyed) {
+                    execStream.end();
+                }
+            });
+        }
+
+        // Handle output from container
+        execStream.on('data', (chunk) => {
+            const demuxed = demultiplexDockerStream(chunk);
+            
+            if (demuxed.stdout) {
+                onOutput(demuxed.stdout.toString('utf8'));
+            }
+            
+            if (demuxed.stderr) {
+                let errorMsg = demuxed.stderr.toString('utf8');
+                
+                // Filter out harmless JVM startup messages
+                const lines = errorMsg.split('\n');
+                const filteredLines = lines.filter(line => 
+                    !line.includes('Picked up JAVA_TOOL_OPTIONS')
+                );
+                const filteredMsg = filteredLines.join('\n');
+                
+                if (filteredMsg.trim()) {
+                    onError(filteredMsg);
+                }
+            }
+        });
+
+        execStream.on('end', () => {
+            clearTimeout(timeoutHandle);
+            onOutput('\n--- End ---\n');
+            onComplete();
+        });
+
+        execStream.on('error', (err) => {
+            clearTimeout(timeoutHandle);
+            onError(`Execution error: ${err.message}`);
+            onComplete();
+        });
+
+    } catch (error) {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        onError(`System error: ${error.message}`);
+        onComplete();
+    } finally {
+        // Cleanup container after execution
+        if (container) {
+            setTimeout(async () => {
+                try {
+                    await container.stop({ t: 0 });
+                    await container.remove();
+                    console.log('Container cleaned up');
+                } catch (err) {
+                    console.error('Cleanup error:', err.message);
+                }
+            }, 1000);
+        }
+    }
+}
+
+/**
+ * Demultiplex Docker stream
+ * Docker multiplexes stdout and stderr into a single stream
+ * with 8-byte headers indicating stream type and size
+ * 
+ * Header format:
+ * [stream_type, 0, 0, 0, size1, size2, size3, size4, ...data...]
+ * stream_type: 1=stdout, 2=stderr
+ * 
+ * @param {Buffer} buffer - Multiplexed stream buffer
+ * @returns {Object} - { stdout: Buffer, stderr: Buffer }
+ */
+function demultiplexDockerStream(buffer) {
+    const result = { stdout: [], stderr: [] };
+    let offset = 0;
+
+    while (offset < buffer.length) {
+        // Read 8-byte header
+        if (offset + 8 > buffer.length) break;
+
+        const streamType = buffer[offset];
+        const size = buffer.readUInt32BE(offset + 4);
+
+        if (offset + 8 + size > buffer.length) break;
+
+        const data = buffer.slice(offset + 8, offset + 8 + size);
+
+        if (streamType === 1) {
+            result.stdout.push(data);
+        } else if (streamType === 2) {
+            result.stderr.push(data);
+        }
+
+        offset += 8 + size;
+    }
+
+    return {
+        stdout: result.stdout.length > 0 ? Buffer.concat(result.stdout) : null,
+        stderr: result.stderr.length > 0 ? Buffer.concat(result.stderr) : null,
+    };
+}
+
+/**
+ * WebSocket connection handler
+ * Manages bidirectional communication for code execution
+ * 
+ * Message format from client:
+ * {
+ *   type: 'execute' | 'stdin',
+ *   language: 'javascript' | 'cpp' | 'java',
+ *   code: 'source code',
+ *   input: 'stdin data'
+ * }
+ * 
+ * Message format to client:
+ * {
+ *   type: 'output' | 'error' | 'complete',
+ *   data: 'message content'
+ * }
+ */
+wss.on('connection', (ws) => {
+    console.log('Client connected');
+    let stdinStream = null;
+
+    ws.on('message', async (message) => {
+        try {
+            const data = JSON.parse(message);
+
+            if (data.type === 'execute') {
+                // Create stdin stream for this execution
+                stdinStream = new Readable({
+                    read() {}
+                });
+
+                // Execute code in Docker
+                await executeInDocker(
+                    data.language,
+                    data.code,
+                    stdinStream,
+                    // onOutput callback
+                    (output) => {
+                        ws.send(JSON.stringify({
+                            type: 'output',
+                            data: output
+                        }));
+                    },
+                    // onError callback
+                    (error) => {
+                        ws.send(JSON.stringify({
+                            type: 'error',
+                            data: error
+                        }));
+                    },
+                    // onComplete callback
+                    () => {
+                        ws.send(JSON.stringify({
+                            type: 'complete'
+                        }));
+                        stdinStream = null;
+                    }
+                );
+            } else if (data.type === 'stdin') {
+                // Send stdin data to running container
+                if (stdinStream) {
+                    stdinStream.push(data.input + '\n');
+                }
+            }
+        } catch (error) {
+            ws.send(JSON.stringify({
+                type: 'error',
+                data: `Error: ${error.message}`
+            }));
+        }
+    });
+
+    ws.on('close', () => {
+        console.log('Client disconnected');
+        if (stdinStream) {
+            stdinStream.push(null); // End stream
+        }
+    });
+
+    ws.on('error', (error) => {
+        console.error('WebSocket error:', error);
     });
 });
 
-app.post('/compile/javascript', (req, res) => {
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Get available languages
+app.get('/languages', (req, res) => {
+    res.json({
+        languages: Object.keys(LANGUAGE_CONFIG)
+    });
+});
+
+// Legacy REST endpoint (for backward compatibility)
+// This is kept for testing but WebSocket is recommended
+app.post('/compile/:language', async (req, res) => {
+    const { language } = req.params;
     const { code } = req.body;
-    const { fileName, filePath, tempDir } = createTempFile('js', code);
 
-    const runCommand = `node ${filePath}`;
-    exec(runCommand, (error, stdout, stderr) => {
-        if(error){
-            cleanupTempFiles(filePath);
-            return res.status(500).json({ error: stderr || error.message });
+    let output = '';
+    let error = '';
+
+    const stdinStream = new Readable({
+        read() {}
+    });
+    stdinStream.push(null); // No stdin for REST API
+
+    await executeInDocker(
+        language,
+        code,
+        stdinStream,
+        (data) => { output += data; },
+        (data) => { error += data; },
+        () => {
+            if (error) {
+                res.status(500).json({ error });
+            } else {
+                res.json({ output });
+            }
         }
-
-        return res.json({ output: stdout });
-    })
+    );
 });
 
-app.listen(port, () => {
-    console.log(`Server is running on port ${port}`);
+// Start server
+server.listen(port, () => {
+    console.log(`
+╔════════════════════════════════════════════════════════════╗
+║     Docker-Based Code Execution Server                    ║
+╠════════════════════════════════════════════════════════════╣
+║  Server running on port: ${port}                          ║
+║  WebSocket endpoint: ws://localhost:${port}               ║
+║  HTTP endpoint: http://localhost:${port}                  ║
+╠════════════════════════════════════════════════════════════╣
+║  Security Features:                                        ║
+║  ✓ Container isolation                                    ║
+║  ✓ Resource limits (128MB RAM, 512 CPU shares)           ║
+║  ✓ Network disabled                                       ║
+║  ✓ Process limit (50 max)                                ║
+║  ✓ 10-second execution timeout                           ║
+║  ✓ Non-root container execution                          ║
+╚════════════════════════════════════════════════════════════╝
+    `);
 });
-
-

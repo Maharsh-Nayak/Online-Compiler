@@ -1,0 +1,48 @@
+# Node modules
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+**/dist/
+**/build/
+
+# Temporary files
+Server/temp/
+*.log
+*.tmp
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Package manager files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Docker
+*.tar
+
+ARCHITECTURE.md
+BEFORE-AFTER.md
+DOCKER-SETUP.md
+EXECUTION-FLOW.md
+IMPLEMENTATION-SUMMARY.md
+LEARNING.md
+QUICKSTART.md
+TESTING.md
