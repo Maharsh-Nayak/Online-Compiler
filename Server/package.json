@@ -2,10 +2,10 @@
   "name": "online-compiler-backend",
   "version": "1.0.0",
   "description": "Docker-based backend for Online Compiler",
-  "main": "index.js",
+  "main": "index-docker.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node index.js"
+    "start": "node index-docker.js",
+    "dev": "node index-docker.js"
   },
   "keywords": ["compiler", "docker", "sandbox"],
   "author": "",
