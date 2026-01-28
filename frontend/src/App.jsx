@@ -38,7 +38,7 @@ function App() {
   }, [])
 
   const connectWebSocket = () => {
-    const wsUrl = 'ws://localhost:5000'
+    const wsUrl = 'wss://online-compiler-backend-tp5b.onrender.com'
 
     wsRef.current = new WebSocket(wsUrl)
 
