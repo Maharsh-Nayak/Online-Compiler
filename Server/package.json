@@ -1,20 +1,21 @@
 {
-  "name": "online-compiler",
+  "name": "online-compiler-backend",
   "version": "1.0.0",
+  "description": "Docker-based backend for Online Compiler",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
+  "keywords": ["compiler", "docker", "sandbox"],
   "author": "",
   "license": "ISC",
-  "description": "",
   "dependencies": {
-    "body-parser": "^1.20.2",
-    "cors": "^2.8.5",
-    "dockerode": "^4.0.2",
     "express": "^4.18.2",
-    "nodemon": "^3.1.9",
-    "tar-stream": "^3.1.7",
-    "ws": "^8.16.0"
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2",
+    "dockerode": "^4.0.2",
+    "ws": "^8.14.2",
+    "tar-stream": "^3.1.6"
   }
 }
