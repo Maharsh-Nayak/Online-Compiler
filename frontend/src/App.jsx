@@ -16,9 +16,11 @@ function App() {
   const outputRef = useRef(null)
 
   const defaultCode = {
-    javascript: '// Write your JavaScript code here\nconsole.log("Hello, World!");',
+    javascript: 'console.log("Hello, World!");',
+    c: '#include <stdio.h>\n\nint main() {\n    printf("Hello, World!\\n");\n    return 0;\n}',
+    cpp: '#include <iostream>\n\nint main() {\n    std::cout << "Hello, World!" << std::endl;\n    return 0;\n}',
     java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n    }\n}',
-    cpp: '#include <iostream>\n\nint main() {\n    std::cout << "Hello, World!" << std::endl;\n    return 0;\n}'
+    python: 'print("Hello, World!")'
   }
 
   useEffect(() => {
@@ -38,7 +40,7 @@ function App() {
   }, [])
 
   const connectWebSocket = () => {
-    const wsUrl = 'wss://online-compiler-backend-tp5b.onrender.com'
+    const wsUrl = import.meta.env.VITE_BACKEND_WS_URL
 
     wsRef.current = new WebSocket(wsUrl)
 
@@ -158,9 +160,11 @@ function App() {
               onChange={handleLanguageChange}
               className="language-select"
             >
-              <option value="javascript">JavaScript</option>
-              <option value="java">Java</option>
+              <option value="c">C</option>
               <option value="cpp">C++</option>
+              <option value="java">Java</option>
+              <option value="javascript">JavaScript</option>
+              <option value="python">Python</option>
             </select>
           </div>
           <div className="control-group">

@@ -1,0 +1,15 @@
+# Dockerfile for Python code execution
+FROM python:3.11-slim
+
+# Create non-root user for security
+RUN useradd -m -u 1000 coderunner
+
+# Create working directory
+WORKDIR /app
+RUN chown coderunner:coderunner /app
+
+# Switch to non-root user
+USER coderunner
+
+# Keep container running
+CMD ["/bin/sh"]

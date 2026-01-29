@@ -206,7 +206,7 @@
 .workspace {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 1rem;
   padding: 1rem;
   overflow: hidden;
@@ -222,12 +222,12 @@
 }
 
 .editor-pane {
-  flex: 2;
+  flex: 1;
 }
 
 .output-pane {
   flex: 1;
-  min-height: 150px;
+  min-width: 300px;
 }
 
 .pane-header {

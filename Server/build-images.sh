@@ -9,7 +9,7 @@ echo "╚═══════════════════════�
 echo ""
 
 # Check if Docker is running
-echo "[1/4] Checking Docker..."
+echo "[1/6] Checking Docker..."
 if ! command -v docker &> /dev/null; then
     echo "✗ Error: Docker is not installed"
     echo "  Please install Docker from: https://docs.docker.com/get-docker/"
@@ -26,7 +26,16 @@ DOCKER_VERSION=$(docker --version)
 echo "✓ Docker found: $DOCKER_VERSION"
 
 echo ""
-echo "[2/4] Building C++ Image..."
+echo "[2/6] Building C Image..."
+if docker build -f dockerfiles/Dockerfile.c -t coderunner-c:latest .; then
+    echo "✓ C image built successfully"
+else
+    echo "✗ Failed to build C image"
+    exit 1
+fi
+
+echo ""
+echo "[3/6] Building C++ Image..."
 if docker build -f dockerfiles/Dockerfile.cpp -t coderunner-cpp:latest .; then
     echo "✓ C++ image built successfully"
 else
@@ -35,7 +44,7 @@ else
 fi
 
 echo ""
-echo "[3/4] Building Java Image..."
+echo "[4/6] Building Java Image..."
 if docker build -f dockerfiles/Dockerfile.java -t coderunner-java:latest .; then
     echo "✓ Java image built successfully"
 else
@@ -44,11 +53,20 @@ else
 fi
 
 echo ""
-echo "[4/4] Building JavaScript Image..."
+echo "[5/6] Building JavaScript Image..."
 if docker build -f dockerfiles/Dockerfile.javascript -t coderunner-js:latest .; then
     echo "✓ JavaScript image built successfully"
 else
     echo "✗ Failed to build JavaScript image"
+    exit 1
+fi
+
+echo ""
+echo "[6/6] Building Python Image..."
+if docker build -f dockerfiles/Dockerfile.python -t coderunner-python:latest .; then
+    echo "✓ Python image built successfully"
+else
+    echo "✗ Failed to build Python image"
     exit 1
 fi
 

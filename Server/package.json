@@ -7,18 +7,23 @@
     "start": "node index-docker.js",
     "dev": "node index-docker.js"
   },
-  "keywords": ["compiler", "docker", "sandbox"],
+  "keywords": [
+    "compiler",
+    "docker",
+    "sandbox"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "^4.18.2",
-    "cors": "^2.8.5",
     "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "debug": "4.3.4",
     "dockerode": "^4.0.2",
-    "ws": "^8.14.2",
+    "express": "^4.18.2",
+    "nodemon": "^3.1.11",
     "tar-stream": "^3.1.6",
     "uuid": "9.0.0",
-    "debug": "4.3.4"
+    "ws": "^8.14.2"
   },
   "overrides": {
     "uuid": "9.0.0",

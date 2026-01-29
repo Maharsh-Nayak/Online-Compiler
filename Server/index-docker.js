@@ -5,7 +5,7 @@ const Docker = require('dockerode');
 const WebSocket = require('ws');
 const http = require('http');
 const tar = require('tar-stream');
-const { Readable } = require('stream');
+const { PassThrough } = require('stream');
 
 // Initialize Docker client
 // This connects to your local Docker daemon
@@ -46,7 +46,7 @@ const CONTAINER_CONFIG = {
     StdinOnce: false,                  // Allow multiple stdin writes
 };
 
-const EXECUTION_TIMEOUT = 10000; // 10 seconds max execution time
+const EXECUTION_TIMEOUT = 100000000; // 1000 seconds max execution time
 
 /**
  * Language configurations
@@ -59,6 +59,13 @@ const LANGUAGE_CONFIG = {
         fileName: 'code.js',
         compileCmd: null, // No compilation needed
         runCmd: ['node', 'code.js']
+    },
+    c: {
+        image: 'coderunner-c:latest',
+        fileExtension: 'c',
+        fileName: 'code.c',
+        compileCmd: ['gcc', 'code.c', '-o', 'program', '-std=c11'],
+        runCmd: ['./program']
     },
     cpp: {
         image: 'coderunner-cpp:latest',
@@ -73,6 +80,13 @@ const LANGUAGE_CONFIG = {
         fileName: 'Main.java', // Will be replaced with actual class name
         compileCmd: ['javac', 'Main.java'],
         runCmd: ['java', 'Main']
+    },
+    python: {
+        image: 'coderunner-python:latest',
+        fileExtension: 'py',
+        fileName: 'code.py',
+        compileCmd: null, // No compilation needed
+        runCmd: ['python3', 'code.py']
     }
 };
 
@@ -184,7 +198,7 @@ async function executeInDocker(language, code, stdinStream, onOutput, onError, o
             });
 
             const compileStream = await compileExec.start({ Tty: false });
-            
+
             // Wait for compilation
             const compileOutput = await new Promise((resolve, reject) => {
                 const chunks = [];
@@ -195,17 +209,17 @@ async function executeInDocker(language, code, stdinStream, onOutput, onError, o
 
             // Docker multiplexes streams - demultiplex them
             const demuxed = demultiplexDockerStream(compileOutput);
-            
+
             if (demuxed.stderr && demuxed.stderr.length > 0) {
                 let errorMsg = demuxed.stderr.toString('utf8').trim();
-                
+
                 // Filter out harmless JVM startup messages
                 const lines = errorMsg.split('\n');
-                const realErrors = lines.filter(line => 
+                const realErrors = lines.filter(line =>
                     !line.includes('Picked up JAVA_TOOL_OPTIONS') &&
                     !line.match(/^\s*$/) // ignore blank lines
                 );
-                
+
                 if (realErrors.length > 0) {
                     onError(`Compilation Error:\n${realErrors.join('\n')}`);
                     onComplete();
@@ -223,88 +237,71 @@ async function executeInDocker(language, code, stdinStream, onOutput, onError, o
             AttachStdin: true,
             AttachStdout: true,
             AttachStderr: true,
+            StdinOnce: false,
         });
 
         execStream = await exec.start({
             Tty: false,
+            hijack: true,
             stdin: true,
         });
 
+        await new Promise((resolve, reject) => {
+
+            if (stdinStream) {
+                stdinStream.on('data', (data) => {
+                    if (execStream && !execStream.destroyed) {
+                        execStream.write(data);
+                    }
+                });
+            }
+
+            execStream.on('data', (chunk) => {
+                const demuxed = demultiplexDockerStream(chunk);
+                if (demuxed.stdout) onOutput(demuxed.stdout.toString('utf8'));
+                if (demuxed.stderr) {
+                    const errorMsg = demuxed.stderr.toString('utf8');
+                    if (!errorMsg.includes('Picked up JAVA_TOOL_OPTIONS')) {
+                        onError(errorMsg);
+                    }
+                }
+            });
+
+            execStream.on('end', () => {
+                onOutput('\n--- End ---\n');
+                resolve(); // Only now do we allow the function to move to 'finally'
+            });
+
+            execStream.on('error', (err) => {
+                reject(err);
+            });
+        });
+
         // Set execution timeout
-        timeoutHandle = setTimeout(async () => {
-            onError('\n[System] Execution timeout (10 seconds exceeded)');
-            if (execStream) execStream.end();
-            onComplete();
-        }, EXECUTION_TIMEOUT);
-
-        // Pipe stdin from WebSocket to container
-        if (stdinStream) {
-            stdinStream.on('data', (data) => {
-                if (execStream && !execStream.destroyed) {
-                    execStream.write(data);
-                }
-            });
-
-            stdinStream.on('end', () => {
-                if (execStream && !execStream.destroyed) {
-                    execStream.end();
-                }
-            });
-        }
-
-        // Handle output from container
-        execStream.on('data', (chunk) => {
-            const demuxed = demultiplexDockerStream(chunk);
-            
-            if (demuxed.stdout) {
-                onOutput(demuxed.stdout.toString('utf8'));
-            }
-            
-            if (demuxed.stderr) {
-                let errorMsg = demuxed.stderr.toString('utf8');
-                
-                // Filter out harmless JVM startup messages
-                const lines = errorMsg.split('\n');
-                const filteredLines = lines.filter(line => 
-                    !line.includes('Picked up JAVA_TOOL_OPTIONS')
-                );
-                const filteredMsg = filteredLines.join('\n');
-                
-                if (filteredMsg.trim()) {
-                    onError(filteredMsg);
-                }
-            }
-        });
-
-        execStream.on('end', () => {
-            clearTimeout(timeoutHandle);
-            onOutput('\n--- End ---\n');
-            onComplete();
-        });
-
-        execStream.on('error', (err) => {
-            clearTimeout(timeoutHandle);
-            onError(`Execution error: ${err.message}`);
-            onComplete();
-        });
+        // timeoutHandle = setTimeout(async () => {
+        //     onError('\n[System] Execution timeout (10 seconds exceeded)');
+        //     if (execStream) execStream.end();
+        //     onComplete();
+        // }, EXECUTION_TIMEOUT);
 
     } catch (error) {
         if (timeoutHandle) clearTimeout(timeoutHandle);
         onError(`System error: ${error.message}`);
         onComplete();
     } finally {
-        // Cleanup container after execution
         if (container) {
-            setTimeout(async () => {
-                try {
-                    await container.stop({ t: 0 });
-                    await container.remove();
-                    console.log('Container cleaned up');
-                } catch (err) {
-                    console.error('Cleanup error:', err.message);
-                }
-            }, 1000);
+            try {
+                // Remove the timeout or make it very short
+                console.log('[System] Cleaning up container...');
+                await container.stop({ t: 0 }); // t: 0 means stop immediately
+                await container.remove();
+                console.log('[System] Container removed.');
+            } catch (err) {
+                console.error('Cleanup error:', err.message);
+            }
         }
+        // This tells the WebSocket to set stdinStream to null and stop listening
+        onComplete();
     }
 }
 
@@ -378,9 +375,7 @@ wss.on('connection', (ws) => {
 
             if (data.type === 'execute') {
                 // Create stdin stream for this execution
-                stdinStream = new Readable({
-                    read() {}
-                });
+                stdinStream = new PassThrough();
 
                 // Execute code in Docker
                 await executeInDocker(
@@ -412,7 +407,7 @@ wss.on('connection', (ws) => {
             } else if (data.type === 'stdin') {
                 // Send stdin data to running container
                 if (stdinStream) {
-                    stdinStream.push(data.input + '\n');
+                    stdinStream.write(data.input + '\n');
                 }
             }
         } catch (error) {
@@ -426,7 +421,7 @@ wss.on('connection', (ws) => {
     ws.on('close', () => {
         console.log('Client disconnected');
         if (stdinStream) {
-            stdinStream.push(null); // End stream
+            stdinStream.end(); // End stream
         }
     });
 
@@ -456,10 +451,8 @@ app.post('/compile/:language', async (req, res) => {
     let output = '';
     let error = '';
 
-    const stdinStream = new Readable({
-        read() {}
-    });
-    stdinStream.push(null); // No stdin for REST API
+    const stdinStream = new PassThrough();
+    stdinStream.end(); // No stdin for REST API
 
     await executeInDocker(
         language,
